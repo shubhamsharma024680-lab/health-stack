@@ -103,6 +103,19 @@ def register(data: dict):
 
         con.commit()
         return {'token' : token}
+    except HTTPException:
+        con.rollback()
+        raise
+    except mysql.connector.Error as exc:
+        # Undo the patient, account and session together, then explain what failed.
+        con.rollback()
+        if exc.errno == 1062:
+            # Another request registered this email first (AuthAccount.Email is UNIQUE).
+            raise HTTPException(status_code=403, detail="Already Registered") from exc
+        if exc.sqlstate == '45000':
+            # A trigger rejected the data, e.g. trg_patient_dob_bi for a future date of birth.
+            raise HTTPException(status_code=409, detail=exc.msg) from exc
+        raise HTTPException(status_code=500, detail="Could not create the account.") from exc
     finally:
         cur.close()
         con.close()

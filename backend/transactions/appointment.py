@@ -90,6 +90,10 @@ def attach_records(cur, appointments, include_bill=True):
 def database_failure(con, exc):
     con.rollback()
     if exc.errno == 1062:
+        # Two UNIQUE slot indexes guard Appointment; the error names the one that fired.
+        # The Patient_id index means this patient is already booked at that time.
+        if "Patient_id'" in (exc.msg or ''):
+            raise HTTPException(409, 'You already have an appointment at this time') from exc
         raise HTTPException(409, 'This appointment slot is already occupied') from exc
     if exc.sqlstate == '45000':
         raise HTTPException(409, exc.msg) from exc
@@ -317,7 +321,9 @@ def complete_appointment(appointment_id: int, data: dict, user: dict = Depends(g
         prescription_id = cur.lastrowid
 
         total = consultation_fee
-        for item in data.get("items", []):
+        # Lock medicines in ascending Med_id order. Two doctors prescribing the same
+        # medicines then always lock them in the same order, so they cannot deadlock.
+        for item in sorted(data.get("items", []), key=lambda i: i["medicineId"]):
             cur.execute('select Price from Medicine where Med_id = %s for update', (item["medicineId"],))
             rows = cur.fetchall()
             if not rows:

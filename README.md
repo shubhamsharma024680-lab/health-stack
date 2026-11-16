@@ -12,7 +12,7 @@ The database is the core of the project. It does more than store rows: constrain
 
 | Layer    | Technology                                                            | Folder                                               |
 | -------- | --------------------------------------------------------------------- | ---------------------------------------------------- |
-| Database | MySQL 8.0.16+ (16 tables, 25 triggers, 1 stored procedure)            | `backend/schema`, `backend/seed`, `backend/triggers` |
+| Database | MySQL 8.0.16+ (16 tables, 25 triggers, 2 stored procedures)          | `backend/schema`, `backend/seed`, `backend/triggers` |
 | Backend  | Python 3, FastAPI, `mysql-connector-python` (21 endpoints)            | `backend/transactions`                               |
 | Frontend | React 19, Vite, Tailwind CSS, React Router                            | `frontend/`                                          |
 
@@ -44,12 +44,38 @@ This README is the project report for the DBIS course project (November 2026). *
 
 ## 1. Getting started
 
+### Quick start
+
+For someone who already has MySQL, Python and Node installed. Every command runs from the project root unless it says otherwise; each step is explained below.
+
+```bash
+git clone https://github.com/shubhamsharma024680-lab/health-stack.git && cd health-stack
+
+# database: tables, then triggers, then demo data
+mysql -u root -p -e "SOURCE backend/schema/table.sql; SOURCE backend/triggers/install.sql; SOURCE backend/seed/seed.sql;"
+
+# backend (terminal 1)
+python -m venv backend/.venv && source backend/.venv/bin/activate
+pip install -r backend/requirements.txt
+cp backend/.env.example backend/transactions/.env      # set My_SQL_USER and My_SQL_PASSWORD
+python -m uvicorn backend.transactions.server:app --reload
+
+# frontend (terminal 2)
+cd frontend && cp .env.example .env && npm install && npm run dev
+```
+
+Then open <http://localhost:5173> and sign in as `patient@demo.com`, `doctor@demo.com` or `pharmacist@demo.com`, password `demo123`.
+
 ### 1.1 Prerequisites
 
-- Git
-- MySQL 8.0.16 or newer. Older versions silently ignore `CHECK` constraints. MariaDB also works; the schema was tested on MariaDB 13.
-- Python 3.10 or newer
-- Node.js 20.19 or newer (needed by Vite)
+| Tool | Version | Check with |
+| --- | --- | --- |
+| Git | any | `git --version` |
+| MySQL **or** MariaDB | MySQL 8.0.16+ (older versions silently ignore `CHECK` constraints); the schema was also tested on MariaDB 13 | `mysql --version` |
+| Python | 3.10+ | `python --version` |
+| Node.js | 20.19+ (needed by Vite) | `node --version` |
+
+On MariaDB the client is also called `mariadb`; every `mysql` command below works the same with it.
 
 ### 1.2 Clone the repository
 
@@ -60,52 +86,116 @@ cd health-stack
 
 ### 1.3 Create the database
 
-Run both scripts from the project root, inside the MySQL client. `table.sql` drops and recreates every table and installs all triggers; `seed.sql` loads the demo data. Running both again resets the demo.
+Start the MySQL client **from the project root**: the `SOURCE` paths below, and the ones inside `install.sql`, are relative to the folder the client was started in. Run the three scripts in this order:
 
 ```bash
 mysql -u root -p
-mysql> SOURCE backend/schema/table.sql;
-mysql> SOURCE backend/seed/seed.sql;
+mysql> SOURCE backend/schema/table.sql;       -- creates the Healthstack database and its 16 tables
+mysql> SOURCE backend/triggers/install.sql;   -- installs the 25 triggers and 2 stored procedures
+mysql> SOURCE backend/seed/seed.sql;          -- loads the demo data
 ```
 
-The last statement prints `Demo ready` and the number of accounts per role (10 patients, 4 doctors, 2 pharmacists).
+The order matters: the triggers must exist before the demo data goes in, because they price the prescriptions and compute the bills. The last statement prints `Demo ready` and the number of accounts per role (10 patients, 4 doctors, 2 pharmacists).
 
-### 1.4 Start the backend
+Running all three again resets the demo: `table.sql` drops every table first, so **it deletes all existing data**. `install.sql` on its own is safe to re-run at any time; it only replaces the triggers and procedures.
 
-The backend code lives in `backend/transactions/` and imports itself as the package `backend.transactions`, so the server is started **from the project root**. It reads its settings from `backend/transactions/.env`.
+**Optional: a dedicated database user.** The backend can log in as `root`, but a user limited to this one database is safer. Still in the MySQL client:
+
+```sql
+CREATE USER 'healthstack'@'localhost' IDENTIFIED BY 'choose-a-password';
+GRANT ALL PRIVILEGES ON Healthstack.* TO 'healthstack'@'localhost';
+```
+
+### 1.4 Configure the backend
+
+The backend reads its settings from **`backend/transactions/.env`** (next to `server.py`, not in `backend/`). Create it from the example and fill in the database login:
+
+```bash
+cp backend/.env.example backend/transactions/.env      # Windows: copy backend\.env.example backend\transactions\.env
+```
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `My_SQL_HOST` | Database server | `localhost` |
+| `My_SQL_PORT` | Database port | `3306` |
+| `My_SQL_USER` | Database user, e.g. `healthstack` or `root` | none: **must be set** |
+| `My_SQL_PASSWORD` | That user's password | none: **must be set** |
+| `My_SQL_DATABASE` | Database name | `Healthstack` |
+| `FRONTEND_ORIGINS` | Comma-separated browser origins allowed to call the API | `http://localhost:5173,http://127.0.0.1:5173` |
+
+`.env` files are git-ignored, so passwords never get committed.
+
+### 1.5 Start the backend
+
+The backend code lives in `backend/transactions/` and imports itself as the package `backend.transactions`, so it must be started **from the project root** with uvicorn. Running `python server.py`, or starting uvicorn from inside `backend/`, fails with `ModuleNotFoundError: No module named 'backend'`.
 
 ```bash
 python -m venv backend/.venv
 source backend/.venv/bin/activate                     # Windows: backend\.venv\Scripts\activate
 pip install -r backend/requirements.txt
-cp backend/.env.example backend/transactions/.env     # then set My_SQL_USER and My_SQL_PASSWORD
-uvicorn backend.transactions.server:app --reload      # serves http://127.0.0.1:8000
+python -m uvicorn backend.transactions.server:app --reload    # serves http://127.0.0.1:8000
 ```
 
-Open <http://127.0.0.1:8000/health/db>; it should return `{"database": "connected"}`. If it returns `Database unavailable`, the user or password in `backend/transactions/.env` is wrong. Interactive API documentation is at <http://127.0.0.1:8000/docs>.
+`--reload` restarts the server when a `.py` file changes. It does not watch `.env`, so restart the server (Ctrl+C, then the same command) after editing `.env`.
 
-### 1.5 Start the frontend
+Check it at <http://127.0.0.1:8000/health/db>: it should return `{"database": "connected"}`. Interactive API documentation is at <http://127.0.0.1:8000/docs>.
+
+### 1.6 Start the frontend
 
 In a second terminal:
 
 ```bash
 cd frontend
-cp .env.example .env          # VITE_API_URL=http://127.0.0.1:8000
+cp .env.example .env          # VITE_API_URL=http://127.0.0.1:8000, where the backend runs
 npm install
 npm run dev                   # serves http://localhost:5173
 ```
 
-Keep the frontend on port 5173: the backend only accepts requests from `localhost:5173` and `127.0.0.1:5173` unless `FRONTEND_ORIGINS` in the backend `.env` is changed.
+Keep the frontend on port 5173: the backend only accepts browser requests from the origins in `FRONTEND_ORIGINS`. If 5173 is busy, Vite quietly moves to 5174 and every request fails; free the port, or add the new origin to `FRONTEND_ORIGINS` and restart the backend.
 
-### 1.6 Log in
+### 1.7 Log in
 
-Open <http://localhost:5173>, pick a role and sign in. Every demo account uses the password `demo123`.
+Open <http://localhost:5173>, pick a role and sign in. Every demo account uses the password `demo123`; the sign-in page also has buttons that fill them in.
 
 | Role       | Email                 | Who                               |
 | ---------- | --------------------- | --------------------------------- |
 | Patient    | `patient@demo.com`    | Aarav Mehta                       |
 | Doctor     | `doctor@demo.com`     | Dr. Meera Iyer (General Medicine) |
 | Pharmacist | `pharmacist@demo.com` | Riya Shah                         |
+
+New patients can also create their own account from the sign-in page.
+
+### 1.8 Day-to-day use
+
+| Task | Command (from the project root) |
+| --- | --- |
+| Start the backend again | `source backend/.venv/bin/activate && python -m uvicorn backend.transactions.server:app --reload` |
+| Start the frontend again | `cd frontend && npm run dev` |
+| Reset the demo data (**deletes all data**) | `mysql -u root -p -e "SOURCE backend/schema/table.sql; SOURCE backend/triggers/install.sql; SOURCE backend/seed/seed.sql;"` |
+| Reinstall only the triggers and procedures | `mysql -u root -p -e "SOURCE backend/triggers/install.sql;"` |
+| Run the frontend tests (18 tests) | `cd frontend && npm test` |
+| Lint the frontend | `cd frontend && npm run lint` |
+| Production build of the frontend | `cd frontend && npm run build` (output in `frontend/dist/`) |
+
+**Adding a staff member.** There is no staff screen; add staff from the MySQL client with the employee onboarding transaction ([section 5.9](#59-employee-onboarding)), which inserts the employee and their role row together:
+
+```sql
+USE Healthstack;
+CALL onboard_employee(106, 'Asha', 'Menon', 'Female', '1990-02-14', CURDATE(),
+                      'asha@demo.com', 118000, 'Doctor', 'DEMO-CARD-106', 2, 200, NULL, NULL);
+```
+
+### 1.9 Troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| `ModuleNotFoundError: No module named 'backend'` | The backend was started from the wrong folder or with `python server.py`. Run `python -m uvicorn backend.transactions.server:app --reload` from the project root. |
+| `/health/db` returns `{"detail":"Database unavailable"}` | The backend cannot reach the database. Test the same login by hand with `mysql -u <user> -p Healthstack`: if that fails with "Access denied", fix `My_SQL_USER` and `My_SQL_PASSWORD`; with "Unknown database", run the scripts in [1.3](#13-create-the-database); with "Can't connect", start MySQL. Also check the file is `backend/transactions/.env` (not `backend/.env`), and restart the backend after editing it. |
+| `Failed to open file 'backend/schema/table.sql'` | The MySQL client was not started from the project root. Quit, `cd` into the project, and start it again. |
+| The app says "Can't reach the server. Check that the backend is running, then retry." | The backend is not running, or `VITE_API_URL` in `frontend/.env` points elsewhere. Restart `npm run dev` after changing `frontend/.env`. |
+| Sign-in fails and the browser console shows a CORS error | The frontend is not on port 5173 (see [1.6](#16-start-the-frontend)). |
+| `npm run dev` fails with a Node.js version error | Install Node.js 20.19 or newer. |
+| Bad data is accepted that a `CHECK` should reject | MySQL is older than 8.0.16, which ignores `CHECK` constraints. Upgrade, or use MariaDB. |
 
 ## 2. ER model
 
@@ -369,7 +459,7 @@ Not FDs: `Bill_amount` is computed from the visit's prescription, which within B
 
 ## 4. Triggers
 
-`table.sql` installs 25 triggers and one stored procedure. The definitions are also grouped by topic in [`backend/triggers/`](backend/triggers/); running [`install.sql`](backend/triggers/install.sql) reinstalls them without touching data.
+There are 25 triggers and two stored procedures (`check_employee_role`, used by the role triggers, and `onboard_employee`, the [employee onboarding transaction](#59-employee-onboarding)), grouped by topic in [`backend/triggers/`](backend/triggers/) (see [`TRIGGERS.md`](backend/triggers/TRIGGERS.md)). [`install.sql`](backend/triggers/install.sql) installs them all; it can be re-run at any time without touching data.
 
 All triggers run `BEFORE` the row is written, once per row. A trigger either rejects the change with `SIGNAL SQLSTATE '45000'`, which cancels the statement and returns a message, or fills in values with `SET NEW.column = …`. The backend turns SQLSTATE 45000 into an HTTP 409 carrying the trigger's message.
 
@@ -444,7 +534,7 @@ VALUES (%s, %s, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY));
 COMMIT;
 ```
 
-The three inserts commit together, so a patient never exists without a login. Each new ID comes from `cursor.lastrowid`.
+The three inserts commit together, so a patient never exists without a login. Each new ID comes from `cursor.lastrowid`. Any database error rolls all three back and is reported clearly: a duplicate email that slipped past the first check (error 1062 on `AuthAccount.Email`) returns 403 "Already Registered", and a trigger rejection such as a future date of birth returns 409 with the trigger's message.
 
 ### 5.3 Logout
 
@@ -464,13 +554,17 @@ INSERT INTO Appointment (Patient_id, Doctor_id, App_date, App_time) VALUES (%s, 
 COMMIT;
 ```
 
-The slot rules (one of six times, within the next 3 days, in the future) are checked in Python first. There is no "is the slot free?" query: the unique slot indexes reject a clash with error 1062, which the backend returns as 409 "This appointment slot is already occupied". So two patients booking the same slot at the same moment can't both succeed.
+The slot rules (one of six times, within the next 3 days, in the future) are checked in Python first. There is no "is the slot free?" query: the two unique slot indexes reject a clash with error 1062, and the backend reads which index fired. The doctor's index returns 409 "This appointment slot is already occupied"; the patient's index (the patient already has a visit at that time, with any doctor) returns 409 "You already have an appointment at this time". So two patients booking the same slot at the same moment can't both succeed.
 
 ### 5.5 View appointments
 
 ```sql
-SELECT a.Appointment_id, a.App_date, a.App_time, a.App_status, e.First_name, e.Last_name
-FROM Appointment a JOIN Employee e ON e.Employee_id = a.Doctor_id
+SELECT a.Appointment_id, a.Doctor_id, a.App_date, TIME_FORMAT(a.App_time, '%H:%i') AS App_time, a.App_status,
+       e.First_name, e.Last_name, dep.Dept_name
+FROM Appointment a
+JOIN Employee e ON e.Employee_id = a.Doctor_id
+LEFT JOIN Doctor d ON d.Employee_id = a.Doctor_id
+LEFT JOIN Department dep ON dep.Dept_id = d.Dept_id
 WHERE a.Patient_id = %s ORDER BY a.App_date DESC, a.App_time DESC;
 ```
 
@@ -479,19 +573,24 @@ A read-only join, so it needs no transaction. The prescription and bill for each
 ### 5.6 Cancel and reschedule
 
 ```sql
--- cancel: one guarded UPDATE; 0 rows changed means it could not be cancelled
+-- cancel: one guarded UPDATE; 0 rows changed means it could not be cancelled (ROLLBACK, 409)
+START TRANSACTION;
 UPDATE Appointment SET App_status = 'Cancelled'
 WHERE Appointment_id = %s AND Patient_id = %s AND App_status = 'Scheduled' AND App_date > %s;
+COMMIT;
 
 -- reschedule
 START TRANSACTION;
 SELECT Doctor_id, App_status, App_date FROM Appointment
-WHERE Appointment_id = %s AND Patient_id = %s FOR UPDATE;
+WHERE Appointment_id = %s AND Patient_id = %s FOR UPDATE;   -- not Scheduled or not in the future: ROLLBACK
+SELECT Is_active FROM Employee WHERE Employee_id = %s;      -- doctor inactive: ROLLBACK
 SELECT 1 FROM Prescription WHERE Appointment_id = %s
 UNION SELECT 1 FROM Bill WHERE Appointment_id = %s;        -- any row: ROLLBACK
 UPDATE Appointment SET App_date = %s, App_time = %s WHERE Appointment_id = %s;
 COMMIT;
 ```
+
+A taken slot fails on the unique slot indexes exactly as in booking.
 
 ### 5.7 Complete a visit (doctor)
 
@@ -500,7 +599,7 @@ START TRANSACTION;
 SELECT a.App_status, a.App_date FROM Appointment a JOIN Employee e ON a.Doctor_id = e.Employee_id
 WHERE a.Appointment_id = %s AND a.Doctor_id = %s AND e.Is_active = TRUE FOR UPDATE;
 INSERT INTO Prescription (Appointment_id, Pres_date, Notes, Valid_until) VALUES (%s, %s, %s, %s);
--- for each medicine:
+-- for each medicine, in ascending Med_id order:
 SELECT Price FROM Medicine WHERE Med_id = %s FOR UPDATE;
 INSERT INTO Pres_Details (Pres_id, Med_id, Quantity, Dosage, Frequency, Unit_price)
 VALUES (%s, %s, %s, %s, %s, %s);
@@ -512,7 +611,7 @@ WHERE Employee_id = %s AND Current_appointment_id = %s;
 COMMIT;
 ```
 
-This is the largest transaction: five tables change together. `FOR UPDATE` locks the appointment, so a double click can't complete it twice, and the bill trigger recomputes the total. If any step fails (an unknown medicine, a trigger, a lost connection), the prescription, its medicines and the bill are all undone.
+This is the largest transaction: five tables change together. `FOR UPDATE` locks the appointment, so a double click can't complete it twice, and the bill trigger recomputes the total. Medicines are locked in ascending `Med_id` order whatever order the doctor added them in, so two doctors prescribing the same medicines always lock them in the same order and cannot deadlock. If any step fails (an unknown medicine, a trigger, a lost connection), the prescription, its medicines and the bill are all undone.
 
 ### 5.8 Record a payment (pharmacist)
 
@@ -525,7 +624,35 @@ COMMIT;
 
 The row lock means two staff members can't both record the same payment (see [6.3](#63-example-two-pharmacists-pay-the-same-bill)).
 
-### 5.9 ACID properties
+### 5.9 Employee onboarding
+
+Adds an `Employee` row and its subclass row (Doctor, Nurse, Ward_boy, Receptionist or Pharmacist) together, so no employee is left without a role row; the triggers only check each row on its own. There is no staff screen or admin login, so this runs inside the database as the stored procedure `onboard_employee`, defined in [`backend/triggers/employee.sql`](backend/triggers/employee.sql) and installed by `install.sql`. Usage is shown in [1.8](#18-day-to-day-use) and the arguments are listed in [`backend/transactions/README.md`](backend/transactions/README.md#employee-onboarding).
+
+```sql
+CREATE PROCEDURE onboard_employee(...)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;          -- pass the original error back to the caller
+    END;
+    START TRANSACTION;
+    INSERT INTO Employee (Employee_id, First_name, Last_name, Gender, DOB, Date_join, Mail, Salary, Role) VALUES (...);
+    CASE p_role            -- the subclass row for the role
+        WHEN 'Doctor'       THEN INSERT INTO Doctor (Employee_id, License_no, Dept_id, Consultation_fee) VALUES (...);
+        WHEN 'Nurse'        THEN INSERT INTO Nurse (Employee_id) VALUES (...);
+        WHEN 'Ward_boy'     THEN INSERT INTO Ward_boy (Employee_id, Ward_id) VALUES (...);
+        WHEN 'Receptionist' THEN INSERT INTO Receptionist (Employee_id, Desk_no) VALUES (...);
+        WHEN 'Pharmacist'   THEN INSERT INTO Pharmacist (Employee_id) VALUES (...);
+        ELSE SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'this role has no subclass table yet';
+    END CASE;
+    COMMIT;
+END
+```
+
+Any failure, whether a `CHECK` or `NOT NULL` constraint, a foreign key, a duplicate email, a trigger such as "at least 18 when joining", or a Technician (who has no subclass table yet), rolls back both rows and re-raises the original error. It does not create a login; staff logins are `AuthAccount` rows.
+
+### 5.10 ACID properties
 
 | Property        | How HealthStack achieves it                                                                                                                                  |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -549,7 +676,7 @@ MySQL's InnoDB engine primarily locks index records (and also uses intention loc
 
 | Transaction      | Rows locked (X)                                                           | Race it prevents                                                                                       |
 | ---------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Complete a visit | The appointment (`FOR UPDATE`), then each prescribed medicine (`FOR UPDATE`) | Two clicks completing the same visit twice; a medicine's price changing between reading it and storing it |
+| Complete a visit | The appointment (`FOR UPDATE`), then each prescribed medicine (`FOR UPDATE`, in ascending `Med_id` order) | Two clicks completing the same visit twice; a medicine's price changing between reading it and storing it; two doctors deadlocking on the same medicines |
 | Record a payment | The bill (`FOR UPDATE`)                                                   | Two pharmacists recording the same payment                                                             |
 | Reschedule       | The appointment (`FOR UPDATE`)                                            | The visit being completed or cancelled while it is being moved                                         |
 | Cancel           | The appointment (implicit, from `UPDATE`)                                 | Cancelling a visit that was just completed; the `WHERE` re-checks the status under the lock            |
@@ -572,7 +699,7 @@ Without `FOR UPDATE`, both sessions would read Pending at steps 2 and 4 and both
 
 - **Lock first, check second, write last.** A check is only reliable while the row it read is locked.
 - **Keep transactions short.** Locks are held until commit, so no transaction waits for user input.
-- **Deadlocks.** If two transactions wait for each other, InnoDB detects the cycle and rolls one back with error 1213; the API returns an error and the user can retry. A lock that is not released within `innodb_lock_wait_timeout` (50 s by default) also fails the waiting statement. Locking medicines in ascending `Med_id` order reduces deadlock risk when doctors prescribe the same medicines in different orders.
+- **Deadlocks.** If two transactions wait for each other, InnoDB detects the cycle and rolls one back with error 1213; the API returns an error and the user can retry. A lock that is not released within `innodb_lock_wait_timeout` (50 s by default) also fails the waiting statement. To avoid deadlocks in the first place, every transaction that locks several rows of one table locks them in a fixed order: completing a visit locks its medicines in ascending `Med_id` order, whatever order the doctor added them in.
 
 ## 7. Backend
 
@@ -631,7 +758,7 @@ All modules are in [`backend/transactions/`](backend/transactions/).
 - **Passwords** are stored as `scrypt$<salt>$<hash>` (n = 16384, r = 8, p = 1). scrypt is deliberately slow, so a stolen hash is expensive to guess.
 - **Sessions:** login creates a random token (`secrets.token_urlsafe(32)`), valid for one day. The client sends it as `Authorization: Bearer <token>`; the server stores and compares only its SHA-256 hash.
 - **Authorisation:** every protected route checks the caller's role (403 otherwise), and reads the patient or doctor ID from the session, never from the URL, so users can only see their own records.
-- **Error mapping:** duplicate key (1062) ⇒ 409 "slot already occupied"; trigger `SIGNAL` (SQLSTATE 45000) ⇒ 409 with the trigger's message; anything else ⇒ 500.
+- **Error mapping:** duplicate key (1062) on an appointment ⇒ 409 "This appointment slot is already occupied", or "You already have an appointment at this time" when the patient's own slot index fired; duplicate email on registration ⇒ 403 "Already Registered"; trigger `SIGNAL` (SQLSTATE 45000) ⇒ 409 with the trigger's message; anything else ⇒ 500. Every error rolls the transaction back first.
 - **Time:** all "today" checks in Python use Asia/Kolkata time.
 
 ## 8. Frontend
@@ -717,7 +844,7 @@ Taken from the running application with the seed data loaded.
 | Trigger that sets `NEW.column`                                      | `Unit_price` and `Bill_amount`                                                        |
 | `mysql.connector` with `%s` parameters, `try/except` + `rollback()` | Every endpoint (no string-built SQL, so no SQL injection)                             |
 
-Used beyond the tutorials: one stored procedure, a `STORED` generated column, `ENUM`, `UNION`, and `IF EXISTS` inside triggers.
+Used beyond the tutorials: stored procedures (one with an `EXIT HANDLER` that rolls back and `RESIGNAL`s), a `STORED` generated column, `ENUM`, `UNION`, and `IF EXISTS` inside triggers.
 
 ## 10. Limitations and future work
 
@@ -725,3 +852,4 @@ Used beyond the tutorials: one stored procedure, a `STORED` generated column, `E
 - The consultation fee is fixed at 200 instead of the doctor's own fee; fixing it also brings `Bill` to BCNF (section 3.2, note 3).
 - `AuthAccount.Role` does not include receptionists, nurses or ward boys, so only patients, doctors and pharmacists can log in, and only pharmacists can use the billing screens.
 - Payments are always recorded as Cash; there is no payment gateway.
+- There is no staff-management screen or admin login: staff are added from the MySQL client with `CALL onboard_employee(...)` ([5.9](#59-employee-onboarding)), and that does not create a login for them.
