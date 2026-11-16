@@ -47,7 +47,9 @@ export function BookingDialog({ initialDoctorId = "", initialDate, initialTime =
       navigate(`/appointments/${result.appointment_id}`);
     } catch (err) {
       // Keep every other field; refresh the slots so the patient can choose again.
-      setFormError(err.status === 409 ? SLOT_TAKEN : err.message);
+      // Someone else took the slot: say so plainly. Any other 409 (for example the
+      // patient already has a visit at that time) shows the server's own message.
+      setFormError(err.status === 409 && /occupied/i.test(err.message) ? SLOT_TAKEN : err.message);
       setForm((f) => ({ ...f, time: "" }));
       setRefreshKey((k) => k + 1);
       setBusy(false);
