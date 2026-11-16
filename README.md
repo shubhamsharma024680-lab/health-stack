@@ -19,15 +19,7 @@ The database is the core of the project. It does more than store rows: constrain
 **Scope.** Hospital staff structure (employees, doctors, nurses, ward boys, receptionists, pharmacists, wards, departments) is fully modelled in the database. The application workflows cover outpatient care: appointments, prescriptions and billing. Ward admissions and technicians appear in the ER diagram as planned extensions.
 
 This README is the project report for the DBIS course project (November 2026). **Demo videos:** [`docs/demo/`](docs/demo/), a walkthrough of all three roles and a recording of transactions, triggers and locks in the running app.
-
-## Team
-
-| Name            | Roll no.  | Main contributions                                                                          |
-| --------------- | --------- | ------------------------------------------------------------------------------------------- |
-| Darshik Ladhe   | 250001025 | FastAPI backend and its APIs (authentication, appointments, billing), triggers, seed data   |
-| Deepak Chahar   | 250001026 | Schema design and fixes, ER diagram, frontend and its tests, documentation                  |
-| Shubham Sharma  | 250051017 | Transactions, grouping the triggers and aligning them with the schema                       |
-| Kedar Hadnurkar | 250001038 | Repository configuration                                                                    |
+                                                                 |
 
 ## Contents
 
